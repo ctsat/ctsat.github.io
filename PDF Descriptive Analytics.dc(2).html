@@ -1,0 +1,1277 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="description" content="Deterministic descriptive analytics for a PDF: counts, readability, term frequency, structural markers, per-page breakdown.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,300..700&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; background: #F4F1EC; }
+  a { color: #1F4E68; }
+  a:hover { color: #0B0B0B; }
+  ::selection { background: #D8E5EC; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+</helmet>
+
+<div style="min-height:100vh;background:#F4F1EC;font-family:'IBM Plex Sans',sans-serif;color:#141210;padding:0 0 64px;" onDragOver="{{ onDragOver }}" onDragLeave="{{ onDragLeave }}" onDrop="{{ onDrop }}">
+
+  <div style="max-width:1120px;margin:0 auto;padding:0 24px;">
+
+    <header style="display:flex;flex-wrap:wrap;gap:20px;align-items:flex-end;justify-content:space-between;padding:34px 0 18px;border-bottom:1px solid #141210;">
+      <div style="min-width:0;">
+        
+        <h1 style="font-family:'Source Serif 4',Georgia,serif;font-weight:600;font-size:30px;line-height:1.1;margin:0;">Document metrics</h1>
+        <div style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-top:10px;font-size:12.5px;color:#575045;">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;background:#E7E2D9;border:1px solid #DBD4C8;border-radius:2px;padding:3px 8px;max-width:min(60vw,420px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ fileName }}</span>
+          <span>{{ statusLine }}</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="file" id="pdf-input" accept="application/pdf" onChange="{{ onPick }}" style="display:none">
+        <label for="pdf-input" style="cursor:pointer;font-size:12.5px;font-weight:500;padding:9px 14px;border:1px solid #141210;background:#141210;color:#FBFAF8;border-radius:2px;" style-hover="background:#1F4E68;border-color:#1F4E68;">Open a PDF</label>
+        <button onClick="{{ onExportCsv }}" style="cursor:pointer;font-family:'IBM Plex Sans',sans-serif;font-size:12.5px;font-weight:500;padding:9px 14px;border:1px solid #C7BFB2;background:transparent;color:#141210;border-radius:2px;" style-hover="border-color:#141210;background:#EAE5DC;">Export CSV</button>
+        <button onClick="{{ onExportJson }}" style="cursor:pointer;font-family:'IBM Plex Sans',sans-serif;font-size:12.5px;font-weight:500;padding:9px 14px;border:1px solid #C7BFB2;background:transparent;color:#141210;border-radius:2px;" style-hover="border-color:#141210;background:#EAE5DC;">Export JSON</button>
+      </div>
+    </header>
+
+    <sc-if value="{{ busy }}" hint-placeholder-val="{{ true }}">
+      <div style="padding:70px 0;text-align:center;color:#6B6459;">
+        <div style="font-family:'Source Serif 4',Georgia,serif;font-size:19px;color:#141210;">Reading the document…</div>
+        <div style="font-size:12.5px;margin-top:8px;">{{ progressLabel }}</div>
+        <div style="height:3px;background:#E2DCD2;margin:18px auto 0;max-width:320px;border-radius:2px;overflow:hidden;">
+          <div style="{{ progressBar }}"></div>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ failed }}" hint-placeholder-val="{{ false }}">
+      <div style="margin:28px 0;padding:18px 20px;border:1px solid #C86B4A;background:#FBEFE9;border-radius:3px;">
+        <div style="font-weight:600;font-size:13.5px;margin-bottom:5px;">Could not analyse this file</div>
+        <div style="font-size:12.5px;line-height:1.5;color:#5A4238;">{{ error }}</div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ ready }}" hint-placeholder-val="{{ false }}">
+      <div>
+
+        <nav style="display:flex;gap:8px;margin:24px 0 0;">
+          <sc-for list="{{ modeTabs }}" as="m" hint-placeholder-count="2">
+            <button onClick="{{ m.onClick }}" style="{{ m.style }}">{{ m.label }}</button>
+          </sc-for>
+        </nav>
+
+        <sc-if value="{{ isComplex }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:22px 24px 24px;margin-top:22px;">
+              <div style="display:flex;flex-wrap:wrap;gap:10px 18px;align-items:baseline;justify-content:space-between;margin-bottom:16px;">
+                <h2 style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#575045;margin:0;font-weight:600;">OpenAI extraction pass</h2>
+                <p style="font-size:11.5px;color:#575045;margin:0;">{{ runMeta }}</p>
+              </div>
+              <div style="display:grid;grid-template-columns:minmax(220px,1fr) 180px auto;gap:12px;align-items:end;">
+                <label style="display:block;">
+                  <span style="display:block;font-size:11px;color:#575045;margin-bottom:6px;">OpenAI API key — kept in this browser only, sent to the endpoint below and nowhere else</span>
+                  <input type="password" value="{{ oaKey }}" onInput="{{ onKeyInput }}" placeholder="sk-…" style="width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace;font-size:12.5px;padding:10px 12px;border:1px solid #C7BFB2;border-radius:2px;background:#FFFDFA;color:#141210;" style-focus="outline:none;border-color:#1F4E68;">
+                </label>
+                <label style="display:block;">
+                  <span style="display:block;font-size:11px;color:#575045;margin-bottom:6px;">Model</span>
+                  <select value="{{ oaModel }}" onChange="{{ onModelChange }}" style="width:100%;box-sizing:border-box;font-family:'IBM Plex Sans',sans-serif;font-size:12.5px;padding:10px 10px;border:1px solid #C7BFB2;border-radius:2px;background:#FFFDFA;color:#141210;">
+                    <sc-for list="{{ oaModels }}" as="m" hint-placeholder-count="3">
+                      <option value="{{ m.id }}">{{ m.label }}</option>
+                    </sc-for>
+                  </select>
+                </label>
+                <button onClick="{{ onRunComplex }}" style="{{ runBtnStyle }}">{{ runBtnLabel }}</button>
+              </div>
+              <label style="display:block;margin-top:14px;">
+                <span style="display:block;font-size:11px;color:#575045;margin-bottom:6px;">API base URL — OpenAI direct works from a server; from a browser origin it needs an endpoint of yours that forwards to OpenAI</span>
+                <input type="text" value="{{ oaBase }}" onInput="{{ onBaseInput }}" placeholder="https://api.openai.com/v1" style="width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace;font-size:12.5px;padding:10px 12px;border:1px solid #C7BFB2;border-radius:2px;background:#FFFDFA;color:#141210;" style-focus="outline:none;border-color:#1F4E68;">
+              </label>
+              <p style="font-size:11.5px;line-height:1.5;color:#575045;margin:14px 0 0;max-width:720px;">{{ payloadNote }}</p>
+              <sc-if value="{{ oaError }}" hint-placeholder-val="{{ false }}">
+                <div style="margin-top:14px;padding:12px 14px;border:1px solid #C86B4A;background:#FBEFE9;border-radius:2px;font-size:12.5px;line-height:1.5;color:#5A4238;">{{ oaError }}</div>
+              </sc-if>
+            </section>
+
+            <sc-if value="{{ hasComplex }}" hint-placeholder-val="{{ false }}">
+              <div>
+                <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:24px 26px 26px;margin-top:22px;">
+                  <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+                    <sc-for list="{{ typePills }}" as="p" hint-placeholder-count="5">
+                      <span style="{{ p.style }}">{{ p.label }}</span>
+                    </sc-for>
+                  </div>
+                  <h3 style="font-family:'Source Serif 4',Georgia,serif;font-size:25px;font-weight:600;line-height:1.2;margin:0 0 10px;">{{ cTitle }}</h3>
+                  <div style="display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:#575045;margin-bottom:18px;">
+                    <span>{{ cAuthors }}</span>
+                    <span style="color:#575045;">{{ cYear }}</span>
+                  </div>
+                  <p style="font-family:'Source Serif 4',Georgia,serif;font-size:15px;line-height:1.6;color:#1E1B16;margin:0 0 18px;max-width:780px;">{{ cSummary }}</p>
+                  <p style="font-size:12px;line-height:1.55;color:#575045;margin:0 0 18px;max-width:780px;">{{ cTypeRationale }}</p>
+                  <div style="display:flex;flex-wrap:wrap;gap:7px;">
+                    <sc-for list="{{ cKeywords }}" as="k" hint-placeholder-count="8">
+                      <span style="font-size:12px;padding:5px 10px;background:#EFEAE1;border:1px solid #E2DCD2;border-radius:2px;color:#575045;">{{ k.label }}</span>
+                    </sc-for>
+                  </div>
+                </section>
+
+                <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:20px 24px 10px;margin-top:22px;">
+                  <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
+                    <h2 style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500;margin:0;">LH_Src_Stats · complex fields</h2>
+                    <p style="font-size:11.5px;color:#575045;margin:0;">Quality scores are 1–5 against a stated rubric.</p>
+                  </div>
+                  <sc-for list="{{ complexRows }}" as="r" hint-placeholder-count="5">
+                    <div style="display:grid;grid-template-columns:minmax(140px,190px) 1fr auto;gap:16px;align-items:baseline;padding:13px 0;border-top:1px solid #EFEAE1;">
+                      <div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;">{{ r.field }}</div>
+                      <div style="font-size:12px;line-height:1.5;color:#575045;">{{ r.note }}</div>
+                      <div style="{{ r.valueStyle }}">{{ r.value }}</div>
+                    </div>
+                  </sc-for>
+                </section>
+
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:22px;margin-top:22px;">
+                  <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:20px 22px 22px;">
+                    <h2 style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#575045;margin:0 0 4px;font-weight:600;">Argument inventory</h2>
+                    <p style="font-size:11.5px;color:#575045;margin:0 0 10px;">Each point comes with the document's own words, checked against the text.</p>
+                    <sc-for list="{{ argRows }}" as="a" hint-placeholder-count="4">
+                      <div style="padding:13px 0;border-top:1px solid #EFEAE1;">
+                        <div style="display:flex;gap:10px;align-items:baseline;">
+                          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#575045;">{{ a.n }}</span>
+                          <span style="font-size:13px;line-height:1.5;font-weight:500;">{{ a.claim }}</span>
+                        </div>
+                        <div style="display:flex;gap:8px;align-items:flex-start;margin:8px 0 0 26px;">
+                          <span style="{{ a.badgeStyle }}">{{ a.badge }}</span>
+                          <span style="font-family:'Source Serif 4',Georgia,serif;font-size:13px;line-height:1.55;color:#575045;">{{ a.span }}</span>
+                        </div>
+                      </div>
+                    </sc-for>
+                  </section>
+
+                  <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:20px 22px 22px;">
+                    <h2 style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#575045;margin:0 0 4px;font-weight:600;">Evidence inventory</h2>
+                    <p style="font-size:11.5px;color:#575045;margin:0 0 10px;">Support offered for the claims, from passages other than where the claim is stated. Reuse of an argument's own passage is flagged.</p>
+                    <sc-for list="{{ evidRows }}" as="e" hint-placeholder-count="4">
+                      <div style="padding:13px 0;border-top:1px solid #EFEAE1;">
+                        <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;">
+                          <span style="{{ e.kindStyle }}">{{ e.kind }}</span>
+                          <span style="{{ e.linkStyle }}">{{ e.link }}</span>
+                          <span style="font-size:13px;line-height:1.5;">{{ e.supports }}</span>
+                        </div>
+                        <div style="{{ e.reuseStyle }}">{{ e.reuse }}</div>
+                        <div style="display:flex;gap:8px;align-items:flex-start;margin:8px 0 0;">
+                          <span style="{{ e.badgeStyle }}">{{ e.badge }}</span>
+                          <span style="font-family:'Source Serif 4',Georgia,serif;font-size:13px;line-height:1.55;color:#575045;">{{ e.span }}</span>
+                        </div>
+                      </div>
+                    </sc-for>
+                  </section>
+                </div>
+
+                <p style="font-size:11.5px;line-height:1.6;color:#575045;margin:22px 0 0;max-width:760px;">{{ groundingNote }}</p>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isSimple }}" hint-placeholder-val="{{ true }}">
+        <div>
+        <nav style="display:flex;gap:2px;margin:22px 0 26px;border-bottom:1px solid #DBD4C8;">
+          <sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="4">
+            <button onClick="{{ tab.onClick }}" style="{{ tab.style }}">{{ tab.label }}</button>
+          </sc-for>
+        </nav>
+
+        <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:20px 22px 8px;margin-bottom:26px;">
+              <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:baseline;justify-content:space-between;margin-bottom:8px;">
+                <h2 style="font-family:'IBM Plex Mono',monospace;font-size:13px;font-weight:500;margin:0;letter-spacing:0.02em;">LH_Src_Stats</h2>
+                <p style="font-size:11.5px;color:#575045;margin:0;">Every field in the schema, with how each number was obtained.</p>
+              </div>
+              <sc-for list="{{ schemaRows }}" as="r" hint-placeholder-count="10">
+                <div style="display:grid;grid-template-columns:minmax(140px,190px) 96px 1fr auto;gap:14px;align-items:center;padding:11px 0;border-top:1px solid #EFEAE1;">
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;">{{ r.field }}</div>
+                  <div><span style="{{ r.badgeStyle }}">{{ r.badgeText }}</span></div>
+                  <div style="font-size:11.5px;line-height:1.45;color:#575045;">{{ r.note }}</div>
+                  <div style="{{ r.valueStyle }}">{{ r.value }}</div>
+                </div>
+              </sc-for>
+            </section>
+
+            <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;background:#DBD4C8;border:1px solid #DBD4C8;border-radius:3px;overflow:hidden;">
+              <sc-for list="{{ cards }}" as="c" hint-placeholder-count="10">
+                <div style="background:#FBFAF8;padding:16px 16px 15px;text-align:center;">
+                  <div style="font-size:9.5px;letter-spacing:0.13em;text-transform:uppercase;color:#575045;margin-bottom:9px;line-height:1.3;">{{ c.label }}</div>
+                  <div style="font-family:'Source Serif 4',Georgia,serif;font-size:27px;font-weight:600;line-height:1;">{{ c.value }}</div>
+                  <div style="font-size:11px;color:#575045;margin-top:6px;">{{ c.note }}</div>
+                </div>
+              </sc-for>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:22px;margin-top:26px;">
+              <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:20px 22px 22px;">
+                <h2 style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#575045;margin:0 0 16px;font-weight:600;">Readability indices</h2>
+                <sc-for list="{{ readability }}" as="r" hint-placeholder-count="4">
+                  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:11px 0;border-bottom:1px solid #EFEAE1;">
+                    <div style="min-width:0;">
+                      <div style="font-size:13px;font-weight:500;">{{ r.name }}</div>
+                      <div style="font-size:11.5px;color:#575045;margin-top:3px;">{{ r.note }}</div>
+                    </div>
+                    <div style="font-family:'Source Serif 4',Georgia,serif;font-size:22px;font-weight:600;white-space:nowrap;">{{ r.value }}</div>
+                  </div>
+                </sc-for>
+              </section>
+
+              <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:20px 22px 22px;">
+                <h2 style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#575045;margin:0 0 16px;font-weight:600;">Sentence length distribution</h2>
+                <sc-for list="{{ sentenceBuckets }}" as="b" hint-placeholder-count="5">
+                  <div style="display:grid;grid-template-columns:78px 1fr 52px;gap:12px;align-items:center;padding:6px 0;">
+                    <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#575045;">{{ b.label }}</div>
+                    <div style="height:14px;background:#EFEAE1;border-radius:2px;overflow:hidden;">
+                      <div style="{{ b.bar }}"></div>
+                    </div>
+                    <div style="font-size:11.5px;text-align:right;color:#575045;">{{ b.value }}</div>
+                  </div>
+                </sc-for>
+                <div style="margin-top:14px;font-size:11.5px;line-height:1.5;color:#575045;">Longest sentence {{ longestSentenceWords }} words · shortest {{ shortestSentenceWords }} · median {{ medianSentenceWords }}.</div>
+              </section>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isLanguage }}" hint-placeholder-val="{{ false }}">
+          <div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:22px;">
+              <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:20px 22px 22px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px;">
+                  <h2 style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#575045;margin:0;font-weight:600;">Most frequent terms</h2>
+                  <button onClick="{{ toggleStopwords }}" style="{{ stopwordBtnStyle }}">{{ stopwordLabel }}</button>
+                </div>
+                <sc-for list="{{ topTerms }}" as="t" hint-placeholder-count="12">
+                  <div style="display:grid;grid-template-columns:minmax(72px,132px) 1fr 92px;gap:12px;align-items:center;padding:5px 0;">
+                    <div style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ t.term }}</div>
+                    <div style="height:13px;background:#EFEAE1;border-radius:2px;overflow:hidden;">
+                      <div style="{{ t.bar }}"></div>
+                    </div>
+                    <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;text-align:right;color:#575045;">{{ t.value }}</div>
+                  </div>
+                </sc-for>
+              </section>
+
+              <div style="display:flex;flex-direction:column;gap:22px;">
+                <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:20px 22px 22px;">
+                  <h2 style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#575045;margin:0 0 16px;font-weight:600;">Repeated two-word phrases</h2>
+                  <sc-for list="{{ topBigrams }}" as="b" hint-placeholder-count="8">
+                    <div style="display:flex;justify-content:space-between;gap:14px;padding:6px 0;border-bottom:1px solid #EFEAE1;font-size:12.5px;">
+                      <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ b.term }}</span>
+                      <span style="font-family:'IBM Plex Mono',monospace;color:#575045;">{{ b.value }}</span>
+                    </div>
+                  </sc-for>
+                </section>
+
+                <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:20px 22px 22px;">
+                  <h2 style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#575045;margin:0 0 14px;font-weight:600;">Word length</h2>
+                  <sc-for list="{{ lengthBuckets }}" as="b" hint-placeholder-count="7">
+                    <div style="display:grid;grid-template-columns:60px 1fr 52px;gap:12px;align-items:center;padding:4px 0;">
+                      <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#575045;">{{ b.label }}</div>
+                      <div style="height:12px;background:#EFEAE1;border-radius:2px;overflow:hidden;">
+                        <div style="{{ b.bar }}"></div>
+                      </div>
+                      <div style="font-size:11.5px;text-align:right;color:#575045;">{{ b.value }}</div>
+                    </div>
+                  </sc-for>
+                </section>
+              </div>
+            </div>
+
+            <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:20px 22px 24px;margin-top:22px;">
+              <h2 style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#575045;margin:0 0 14px;font-weight:600;">Term lookup — occurrences in context</h2>
+              <input type="text" value="{{ query }}" onInput="{{ onQuery }}" placeholder="Type a word or phrase, e.g. evidence" style="width:100%;box-sizing:border-box;font-family:'IBM Plex Sans',sans-serif;font-size:13.5px;padding:11px 13px;border:1px solid #C7BFB2;border-radius:2px;background:#FFFDFA;color:#141210;" style-focus="outline:none;border-color:#1F4E68;">
+              <div style="font-size:12px;color:#575045;margin-top:10px;">{{ queryCountLabel }}</div>
+              <sc-for list="{{ queryHits }}" as="h" hint-placeholder-count="0">
+                <div style="display:grid;grid-template-columns:56px 1fr;gap:14px;padding:10px 0;border-top:1px solid #EFEAE1;">
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#575045;padding-top:3px;">p.{{ h.page }}</div>
+                  <div style="font-family:'Source Serif 4',Georgia,serif;font-size:14px;line-height:1.55;color:#1E1B16;">{{ h.before }}<mark style="background:#DCE8EF;color:#0B2C3D;padding:0 2px;">{{ h.match }}</mark>{{ h.after }}</div>
+                </div>
+              </sc-for>
+            </section>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isStructure }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:22px;">
+            <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:20px 22px 22px;">
+              <h2 style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#575045;margin:0 0 6px;font-weight:600;">Structural markers</h2>
+              <p style="font-size:11.5px;line-height:1.5;color:#575045;margin:0 0 12px;">Pattern matches, not interpretations. Each is a regex count you can audit.</p>
+              <sc-for list="{{ markers }}" as="m" hint-placeholder-count="9">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:9px 0;border-bottom:1px solid #EFEAE1;">
+                  <div style="min-width:0;">
+                    <div style="font-size:12.5px;">{{ m.label }}</div>
+                    <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:#575045;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ m.pattern }}</div>
+                  </div>
+                  <div style="font-family:'Source Serif 4',Georgia,serif;font-size:19px;font-weight:600;">{{ m.value }}</div>
+                </div>
+              </sc-for>
+            </section>
+
+            <div style="display:flex;flex-direction:column;gap:22px;">
+              <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:20px 22px 22px;">
+                <h2 style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#575045;margin:0 0 14px;font-weight:600;">Paragraph profile</h2>
+                <sc-for list="{{ paragraphStats }}" as="p" hint-placeholder-count="4">
+                  <div style="display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid #EFEAE1;font-size:12.5px;">
+                    <span>{{ p.label }}</span>
+                    <span style="font-family:'IBM Plex Mono',monospace;color:#575045;">{{ p.value }}</span>
+                  </div>
+                </sc-for>
+              </section>
+
+              <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:20px 22px 22px;">
+                <h2 style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#575045;margin:0 0 12px;font-weight:600;">Longest sentence</h2>
+                <p style="font-family:'Source Serif 4',Georgia,serif;font-size:14px;line-height:1.6;color:#1E1B16;margin:0;">{{ longestSentence }}</p>
+              </section>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isPages }}" hint-placeholder-val="{{ false }}">
+          <section style="background:#FBFAF8;border:1px solid #DBD4C8;border-radius:3px;padding:0;overflow:hidden;">
+            <div style="overflow-x:auto;">
+              <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+                <thead>
+                  <tr style="background:#141210;color:#FBFAF8;text-align:left;">
+                    <sc-for list="{{ pageColumns }}" as="col" hint-placeholder-count="6">
+                      <th onClick="{{ col.onClick }}" style="{{ col.style }}">{{ col.label }}</th>
+                    </sc-for>
+                  </tr>
+                </thead>
+                <tbody>
+                  <sc-for list="{{ pageRows }}" as="row" hint-placeholder-count="8">
+                    <tr style="{{ row.style }}">
+                      <sc-for list="{{ row.cells }}" as="cell" hint-placeholder-count="6">
+                        <td style="{{ cell.style }}">{{ cell.value }}</td>
+                      </sc-for>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </sc-if>
+
+        
+        </div>
+        </sc-if>
+      </div>
+    </sc-if>
+  </div>
+
+  <sc-if value="{{ dragging }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;background:rgba(20,18,16,0.82);display:flex;align-items:center;justify-content:center;z-index:50;pointer-events:none;">
+      <div style="border:2px dashed #FBFAF8;border-radius:4px;padding:44px 60px;color:#FBFAF8;font-family:'Source Serif 4',Georgia,serif;font-size:22px;">Drop a PDF to analyse it</div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;accentColor&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#1F4E68&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#1F4E68&quot;,&quot;#5C4B8A&quot;,&quot;#2F6B4F&quot;,&quot;#8A4B2F&quot;],&quot;section&quot;:&quot;Appearance&quot;},&quot;topTermCount&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:14,&quot;min&quot;:6,&quot;max&quot;:30,&quot;step&quot;:1,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Analysis&quot;},&quot;stripRunningHeads&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Analysis&quot;}}">
+const WORKER_SRC = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const DEFAULT_PDF = "./uploads/Bertrand Russell on Critical Thinking.pdf";
+
+const STOP = new Set(("the of and to a in that is it for as with was on be by not this are or from at his but they which have "
+  + "had were has an we you all their there been more one so if would what who will no when up out them then she her him "
+  + "my me do does did can could should may might must us our your i he been about into than other only its also such "
+  + "these those over any because how very much most some now upon its").split(/\s+/));
+
+const TERMINAL = /[.!?]["'\u201d\u2019)\]]*$/;
+const ABBR = /\b(Mr|Mrs|Ms|Dr|Prof|St|Jr|Sr|vs|etc|eg|ie|cf|Fig|No|Vol|Ch|pp|p|ed|Eds|approx|Inc|Ltd|Co)\.\s/g;
+
+class Component extends DCLogic {
+  state = {
+    status: "loading", error: "", fileName: "Bertrand Russell on Critical Thinking.pdf",
+    progress: 0, progressLabel: "", tab: "overview", data: null,
+    includeStop: false, query: "", sortKey: "page", sortDir: 1, dragging: false, mode: "simple",
+    oaKey: "", oaModel: "gpt-4.1-mini", oaBase: "https://api.openai.com/v1",
+    oaRunning: false, oaError: "", complex: null
+  };
+
+  restoreComplexState(name) {
+    let key = "", model = this.state.oaModel, base = this.state.oaBase, complex = null;
+    try {
+      key = localStorage.getItem("lh.openai.key") || "";
+      model = localStorage.getItem("lh.openai.model") || model;
+      base = localStorage.getItem("lh.openai.base") || base;
+      const raw = localStorage.getItem("lh.complex." + name);
+      if (raw) complex = JSON.parse(raw);
+    } catch (e) { }
+    this.setState({ oaKey: key, oaModel: model, oaBase: base, complex, oaError: "" });
+  }
+
+  componentDidMount() {
+    // Window-level so a drop anywhere on the page is caught; otherwise the
+    // browser navigates to the dropped PDF instead of analysing it.
+    this.onWinDrag = e => { e.preventDefault(); if (!this.state.dragging) this.setState({ dragging: true }); };
+    this.onWinLeave = e => { if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= innerWidth || e.clientY >= innerHeight) this.setState({ dragging: false }); };
+    this.onWinDrop = e => {
+      e.preventDefault();
+      this.setState({ dragging: false });
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!f) return;
+      if (!/\.pdf$/i.test(f.name) && f.type !== "application/pdf") {
+        this.setState({ status: "error", error: "“" + f.name + "” is not a PDF. This page reads PDFs only." });
+        return;
+      }
+      f.arrayBuffer().then(b => this.process(b, f.name));
+    };
+    addEventListener("dragenter", this.onWinDrag);
+    addEventListener("dragover", this.onWinDrag);
+    addEventListener("dragleave", this.onWinLeave);
+    addEventListener("drop", this.onWinDrop);
+
+    this.waitForPdfjs().then(() => this.loadFromUrl(DEFAULT_PDF)).catch(e =>
+      this.setState({ status: "error", error: String(e && e.message || e) }));
+  }
+
+  componentWillUnmount() {
+    clearInterval(this.oaTimer);
+    removeEventListener("dragenter", this.onWinDrag);
+    removeEventListener("dragover", this.onWinDrag);
+    removeEventListener("dragleave", this.onWinLeave);
+    removeEventListener("drop", this.onWinDrop);
+  }
+
+  componentDidUpdate(prev) {
+    if (prev.stripRunningHeads !== this.props.stripRunningHeads && this.rawPages) this.recompute();
+  }
+
+  waitForPdfjs(tries) {
+    tries = tries || 0;
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_SRC;
+      return Promise.resolve();
+    }
+    if (tries > 120) return Promise.reject(new Error("The PDF engine did not load. Check the network connection and reload."));
+    return new Promise(r => setTimeout(r, 100)).then(() => this.waitForPdfjs(tries + 1));
+  }
+
+  /* ---------- loading ---------- */
+
+  async loadFromUrl(url) {
+    this.setState({ status: "loading", error: "", progress: 0, progressLabel: "Fetching file" });
+    let buf;
+    try {
+      const res = await fetch(encodeURI(url));
+      if (!res.ok) throw new Error("status " + res.status);
+      buf = await res.arrayBuffer();
+    } catch (e) {
+      this.setState({
+        status: "error",
+        error: location.protocol === "file:"
+          ? "This page was opened straight from the file system, so it can't read the sample PDF sitting next to it — browsers block that. Everything else works: drag a PDF anywhere onto this page, or press “Open a PDF” above."
+          : "Could not load " + url + " (" + String(e && e.message || e) + "). Drag a PDF onto this page, or press “Open a PDF” above."
+      });
+      return;
+    }
+    await this.process(buf, url.split("/").pop());
+  }
+
+  async process(buffer, name) {
+    try {
+      this.setState({ status: "loading", error: "", fileName: name, progress: 0.05, progressLabel: "Opening document" });
+      this.restoreComplexState(name);
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_SRC;
+      const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+      const pages = [];
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const tc = await page.getTextContent();
+        pages.push(this.linesFromItems(tc.items, page.getViewport({ scale: 1 })));
+        page.cleanup();
+        this.setState({ progress: 0.05 + 0.9 * (i / pdf.numPages), progressLabel: "Page " + i + " of " + pdf.numPages });
+      }
+      this.rawPages = pages;
+      this.recompute();
+    } catch (e) {
+      this.setState({ status: "error", error: String(e && e.message || e) });
+    }
+  }
+
+  /* ---------- text reconstruction ---------- */
+
+  linesFromItems(items, viewport) {
+    const glyphs = items.filter(it => it.str && it.str.trim() !== "").map(it => ({
+      str: it.str, x: it.transform[4], y: it.transform[5],
+      w: it.width || 0, h: Math.abs(it.transform[3]) || it.height || 10
+    }));
+    glyphs.sort((a, b) => (b.y - a.y) || (a.x - b.x));
+    const lines = [];
+    glyphs.forEach(g => {
+      const last = lines[lines.length - 1];
+      const tol = Math.max(2.2, g.h * 0.45);
+      if (last && Math.abs(last.y - g.y) <= tol) {
+        const gap = g.x - (last.x1);
+        last.text += (gap > g.h * 0.22 && !/\s$/.test(last.text) ? " " : "") + g.str;
+        last.x1 = Math.max(last.x1, g.x + g.w);
+        last.y = (last.y * last.n + g.y) / (last.n + 1);
+        last.n += 1;
+      } else {
+        lines.push({ text: g.str, x0: g.x, x1: g.x + g.w, y: g.y, h: g.h, n: 1 });
+      }
+    });
+    return lines.map(l => ({ text: l.text.replace(/\s+/g, " ").trim(), x0: l.x0, x1: l.x1, y: l.y, h: l.h }))
+      .filter(l => l.text.length > 0)
+      .map(l => Object.assign(l, { width: viewport ? viewport.width : 612 }));
+  }
+
+  runningHeadKeys(pages) {
+    const strip = this.props.stripRunningHeads !== false;
+    if (!strip || pages.length < 3) return new Set();
+    const tally = {};
+    const norm = t => t.replace(/\d+/g, "#").replace(/\s+/g, " ").trim().toLowerCase();
+    pages.forEach(lines => {
+      const cand = [lines[0], lines[1], lines[lines.length - 1], lines[lines.length - 2]].filter(Boolean);
+      new Set(cand.map(l => norm(l.text))).forEach(k => { tally[k] = (tally[k] || 0) + 1; });
+    });
+    const min = Math.max(3, Math.ceil(pages.length * 0.5));
+    return new Set(Object.keys(tally).filter(k => tally[k] >= min && k.length < 90));
+  }
+
+  paragraphsFor(pages) {
+    const heads = this.runningHeadKeys(pages);
+    const norm = t => t.replace(/\d+/g, "#").replace(/\s+/g, " ").trim().toLowerCase();
+    const perPage = [];
+    const paras = [];
+    pages.forEach((raw, pi) => {
+      const lines = raw.filter(l => !heads.has(norm(l.text)) && !/^\s*\d{1,4}\s*$/.test(l.text));
+      const gaps = [];
+      for (let i = 1; i < lines.length; i++) gaps.push(Math.abs(lines[i - 1].y - lines[i].y));
+      const med = gaps.length ? gaps.slice().sort((a, b) => a - b)[Math.floor(gaps.length / 2)] : 12;
+      const minX = lines.length ? Math.min.apply(null, lines.map(l => l.x0)) : 0;
+      const maxX = lines.length ? Math.max.apply(null, lines.map(l => l.x1)) : 612;
+      const pageParas = [];
+      let cur = "";
+      lines.forEach((l, i) => {
+        const prev = lines[i - 1];
+        let brk = false;
+        if (!prev) brk = true;
+        else {
+          const gap = Math.abs(prev.y - l.y);
+          if (gap > med * 1.45) brk = true;
+          if (l.x0 - minX > Math.max(6, l.h * 0.8)) brk = true;
+          if (prev.x1 < maxX - (maxX - minX) * 0.16 && TERMINAL.test(prev.text)) brk = true;
+        }
+        if (brk && cur) { pageParas.push(cur.trim()); cur = ""; }
+        if (cur) {
+          if (/[\u2010-\u2015-]$/.test(cur) && /^[a-z]/.test(l.text)) cur = cur.replace(/[\u2010-\u2015-]$/, "") + l.text;
+          else cur += " " + l.text;
+        } else cur = l.text;
+      });
+      if (cur.trim()) pageParas.push(cur.trim());
+      perPage.push(pageParas.join("\n\n"));
+      pageParas.forEach((p, idx) => {
+        const last = paras[paras.length - 1];
+        if (idx === 0 && last && !TERMINAL.test(last) && /^[a-z\u2018\u2019']/.test(p)) paras[paras.length - 1] = last + " " + p;
+        else paras.push(p);
+      });
+    });
+    return { paras, perPage };
+  }
+
+  /* ---------- metrics ---------- */
+
+  splitSentences(text) {
+    const marked = text.replace(ABBR, (m) => m.replace(". ", ".\u0001"))
+      .replace(/\b([A-Z])\.\s(?=[A-Z]\.)/g, "$1.\u0001");
+    return marked.split(/(?<=[.!?]["'\u201d\u2019)\]]?)\s+(?=["'\u201c\u2018(\[]?[A-Z0-9])/)
+      .map(s => s.replace(/\u0001/g, " ").trim())
+      .filter(s => /[A-Za-z]/.test(s));
+  }
+
+  words(text) {
+    return (text.toLowerCase().match(/[a-z\u00c0-\u024f]+(?:['\u2019][a-z]+)?/g) || []);
+  }
+
+  syllables(w) {
+    w = w.replace(/[^a-z]/g, "");
+    if (w.length <= 3) return 1;
+    w = w.replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, "").replace(/^y/, "");
+    const m = w.match(/[aeiouy]{1,2}/g);
+    return m ? m.length : 1;
+  }
+
+  /* ---------- complex layer: OpenAI extraction ---------- */
+
+  /* Span grounding. Compared on an alphanumeric stream so that line joins,
+     hyphenation, ligatures and punctuation differences don't produce false misses. */
+  flatten(t) {
+    return String(t || "").toLowerCase()
+      .replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"')
+      .replace(/\ufb00/g, "ff").replace(/\ufb01/g, "fi").replace(/\ufb02/g, "fl")
+      .replace(/\ufb03/g, "ffi").replace(/\ufb04/g, "ffl").replace(/\u00e6/g, "ae")
+      .replace(/[^a-z0-9]/g, "");
+  }
+
+  spanStatus(span) {
+    if (!this.hayFlat) return "unchecked";
+    const raw = String(span || "");
+    const f = this.flatten(raw);
+    if (f.length < 8) return "unmatched";
+    if (this.hayFlat.indexOf(f) !== -1) return "verbatim";
+    // A quotation with an elision is still grounded if every kept fragment is in the text.
+    const segs = raw.split(/\u2026|\.\.\.|\[\s*\u2026\s*\]/).map(s => this.flatten(s)).filter(s => s.length >= 12);
+    if (segs.length > 1) {
+      const found = segs.filter(s => this.hayFlat.indexOf(s) !== -1).length;
+      if (found === segs.length) return "elided";
+      if (found > 0) return "near";
+      return "unmatched";
+    }
+    if (this.hayFlat.indexOf(f.slice(0, 40)) !== -1) return "near";
+    if (this.hayFlat.indexOf(f.slice(-40)) !== -1) return "near";
+    return "unmatched";
+  }
+
+  oaSchema() {
+    const strArr = { type: "array", items: { type: "string" } };
+    return {
+      type: "object", additionalProperties: false,
+      required: ["title", "authors", "year", "keywords", "summary", "writing_type", "writing_type_rationale",
+        "arguments", "evidence", "quality_args", "quality_evidence", "quality_citations"],
+      properties: {
+        title: { type: ["string", "null"], description: "Title as printed in the document; null if none is stated." },
+        authors: strArr,
+        year: { type: ["integer", "null"], description: "Year of publication or composition stated in the text; null if not stated." },
+        keywords: strArr,
+        summary: { type: "string", description: "One paragraph, 50-90 words, describing what the document argues and how." },
+        writing_type: { type: "string", enum: ["Informative", "Persuasive", "Entertainment", "Demonstrative", "Ceremonial"] },
+        writing_type_rationale: { type: "string" },
+        arguments: {
+          type: "array",
+          items: {
+            type: "object", additionalProperties: false, required: ["claim", "span"],
+            properties: {
+              claim: { type: "string", description: "The claim in your own words, one sentence." },
+              span: { type: "string", description: "A verbatim quotation from the document, 8-40 words, copied exactly." }
+            }
+          }
+        },
+        evidence: {
+          type: "array",
+          items: {
+            type: "object", additionalProperties: false, required: ["kind", "argument_number", "supports", "span"],
+            properties: {
+              kind: { type: "string", enum: ["quotation", "example", "statistic", "authority", "anecdote", "analogy", "definition", "observation"] },
+              argument_number: { type: "integer", description: "The 1-based position in the arguments array of the claim this backs up. It must be a real index into that array and will usually NOT equal this item's own position in the evidence array. Use 0 if it supports no listed argument." },
+              supports: { type: "string", description: "Restate, in a few words, the claim named by argument_number, so the pairing can be checked." },
+              span: { type: "string", description: "A verbatim quotation from the document, copied exactly, and NOT the same passage used as that argument's own span." }
+            }
+          }
+        },
+        quality_args: this.oaScore("Are the claims clearly stated, ordered, and defended rather than asserted?"),
+        quality_evidence: this.oaScore("Is the support specific, relevant and sufficient for the claims made?"),
+        quality_citations: this.oaScore("Are sources named and traceable enough for a reader to check them?")
+      }
+    };
+  }
+
+  oaScore(rubric) {
+    return {
+      type: "object", additionalProperties: false, required: ["score", "rationale"],
+      properties: {
+        score: { type: "integer", description: "1 to 5. " + rubric },
+        rationale: { type: "string", description: "One sentence, referring to the document." }
+      }
+    };
+  }
+
+  onRunComplex = () => {
+    const key = (this.state.oaKey || "").trim();
+    if (!key) { this.setState({ oaError: "Enter an OpenAI API key to run the complex pass." }); return; }
+    if (!this.state.data) return;
+    this.runComplex(key);
+  };
+
+  async runComplex(key) {
+    const budget = 90000;
+    const full = this.state.data.perPage.join("\n\n");
+    const text = full.slice(0, budget);
+    const started = Date.now();
+    this.setState({ oaRunning: true, oaError: "", oaElapsed: 0 });
+    clearInterval(this.oaTimer);
+    this.oaTimer = setInterval(() => this.setState({ oaElapsed: (Date.now() - started) / 1000 }), 100);
+    const stopTimer = () => clearInterval(this.oaTimer);
+    try {
+      const base = (this.state.oaBase || "https://api.openai.com/v1").replace(/\/+$/, "");
+      const res = await fetch(base + "/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+        body: JSON.stringify({
+          model: this.state.oaModel,
+          temperature: 0,
+          response_format: { type: "json_schema", json_schema: { name: "lh_src_stats_complex", strict: true, schema: this.oaSchema() } },
+          messages: [
+            {
+              role: "system",
+              content: "You analyse a document's own text and nothing else. Never use outside knowledge about the author or work. "
+                + "Every argument and evidence item must include a span copied verbatim from the supplied text, character for character. "
+                + "If a bibliographic field is not stated in the text, return null or an empty array rather than guessing. "
+                + "List every distinct argument you find, in document order; do not cap the list artificially. "
+                + "Keep the two lists distinct. An argument's span is the passage where the author STATES the claim. An evidence item's span "
+                + "must be a DIFFERENT passage that backs a claim up — a quotation from a source, an example, a case, a statistic, an appeal "
+                + "to an authority. Never reuse a passage across the two lists, and never reuse it between evidence items. If a claim is "
+                + "asserted with no separate support in the text, list the argument and give it no evidence item: a short evidence list is "
+                + "the correct answer for an unsupported document. "
+                + "For each evidence item, argument_number must be the position of the claim it supports in the arguments array you are "
+                + "producing, and `supports` must restate that claim. Do not simply number the evidence items 1, 2, 3 in order — several "
+                + "items often back the same argument, and some arguments have none."
+            },
+            {
+              role: "user",
+              content: "File name: " + this.state.fileName + "\n"
+                + (text.length < full.length ? "NOTE: text truncated to the first " + budget + " characters.\n" : "")
+                + "\n--- DOCUMENT TEXT ---\n" + text
+            }
+          ]
+        })
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error((body.error && body.error.message) || ("OpenAI returned " + res.status));
+      const msg = body.choices && body.choices[0] && body.choices[0].message;
+      if (msg && msg.refusal) throw new Error("The model refused this request: " + msg.refusal);
+      const parsed = JSON.parse(msg.content);
+      parsed._usage = body.usage || null;
+      parsed._model = body.model || this.state.oaModel;
+      parsed._seconds = Math.round((Date.now() - started) / 100) / 10;
+      parsed._truncated = text.length < full.length;
+      stopTimer();
+      this.setState({ oaRunning: false, complex: parsed, oaError: "" });
+      try { localStorage.setItem("lh.complex." + this.state.fileName, JSON.stringify(parsed)); } catch (e) { }
+    } catch (e) {
+      stopTimer();
+      const m = String(e && e.message || e);
+      const host = (this.state.oaBase || "").replace(/^https?:\/\//, "").split("/")[0] || "the endpoint";
+      this.setState({
+        oaRunning: false,
+        oaError: /Failed to fetch|NetworkError|load failed|CORS/i.test(m)
+          ? "The browser's CORS preflight to " + host + " was refused, so the request never reached OpenAI — this is not a key problem. "
+            + "This page runs on a sandbox origin that api.openai.com will not accept a preflighted POST from. Point the base URL at an "
+            + "endpoint you control that forwards to OpenAI and returns permissive CORS headers (a Cloudflare Worker, a small server route, "
+            + "or any OpenAI-compatible gateway); the model, schema and key handling stay exactly as they are."
+          : m
+      });
+    }
+  }
+
+  /* LH_Src_Stats — Num_* fields. Deterministic where the field is a count of
+     text features; heuristic proxies for the two that are really extractions. */
+  schemaStats(text, sentences, chars, wordCount, paraCount) {
+    const count = re => (text.match(re) || []).length;
+    const authorYear = count(/\([A-Z][A-Za-z'\u2019-]+(?:\s+(?:et al\.?|and|&)\s+[A-Z][A-Za-z'\u2019-]+)*,?\s+(?:1[6-9]|20)\d{2}[a-z]?\)/g);
+    const bracketed = count(/\[\d{1,3}(?:\s*[\u2013,-]\s*\d{1,3})*\]/g);
+    const shortForm = count(/\b(?:ibid|op\.?\s?cit|loc\.?\s?cit|cf)\b\.?/gi);
+    const footnoteRefs = count(/(?:^|\n)\s*\d{1,3}[.)]\s+[A-Z][A-Za-z'\u2019-]+,/g);
+    const doiUrl = count(/(?:https?:\/\/|www\.|doi:)\S{4,}/gi);
+
+    return [
+      { field: "Num_Characters", value: chars, basis: "exact", note: "including spaces; " + text.replace(/\s/g, "").length.toLocaleString() + " excluding" },
+      { field: "Num_Words", value: wordCount, basis: "exact", note: "alphabetic tokens, contractions kept whole" },
+      { field: "Num_Paragraphs", value: paraCount, basis: "reconstructed", note: "from glyph positions and line gaps" },
+      { field: "Num_Sentences", value: sentences.length, basis: "exact", note: "abbreviation-aware split" },
+      { field: "Num_Citations", value: authorYear + bracketed + shortForm + footnoteRefs, basis: "exact", note: authorYear + " author–year · " + bracketed + " bracketed · " + footnoteRefs + " footnote entries · " + shortForm + " short-form · " + doiUrl + " URL/DOI" }
+    ];
+  }
+
+  recompute() {
+    const { paras, perPage } = this.paragraphsFor(this.rawPages);
+    const text = paras.join("\n\n");
+    if (this.words(text).length < 5) {
+      this.setState({ status: "error", error: "This PDF has no usable embedded text layer — it is probably a scan. Descriptive metrics need OCR first." });
+      return;
+    }
+    this.hayFlat = this.flatten(text);
+    const sentences = this.splitSentences(text.replace(/\n+/g, " "));
+    const words = this.words(text);
+    const chars = text.replace(/\n/g, " ").length;
+    const syl = words.reduce((a, w) => a + this.syllables(w), 0);
+    const complex = words.filter(w => this.syllables(w) >= 3).length;
+    const sentWordCounts = sentences.map(s => this.words(s).length).filter(n => n > 0).sort((a, b) => a - b);
+    const freq = {}, freqAll = {};
+    words.forEach(w => { freqAll[w] = (freqAll[w] || 0) + 1; if (!STOP.has(w) && w.length > 2) freq[w] = (freq[w] || 0) + 1; });
+    const bigrams = {};
+    for (let i = 0; i < words.length - 1; i++) {
+      if (STOP.has(words[i]) || STOP.has(words[i + 1])) continue;
+      const k = words[i] + " " + words[i + 1];
+      bigrams[k] = (bigrams[k] || 0) + 1;
+    }
+    const lengths = {};
+    words.forEach(w => { const b = Math.min(10, w.length); lengths[b] = (lengths[b] || 0) + 1; });
+    const wps = words.length / Math.max(1, sentences.length);
+    const spw = syl / Math.max(1, words.length);
+
+    const count = re => (text.match(re) || []).length;
+    const data = {
+      pages: this.rawPages.length, perPage,
+      chars, charsNoSpace: text.replace(/\s/g, "").length,
+      words: words.length, unique: Object.keys(freqAll).length,
+      sentences: sentences.length, paragraphs: paras.length,
+      wps, spw, cpw: text.replace(/\s/g, "").length / Math.max(1, words.length),
+      ttr: Object.keys(freqAll).length / Math.max(1, words.length),
+      hapax: Object.keys(freqAll).filter(k => freqAll[k] === 1).length,
+      longWords: words.filter(w => w.length > 6).length,
+      flesch: 206.835 - 1.015 * wps - 84.6 * spw,
+      fk: 0.39 * wps + 11.8 * spw - 15.59,
+      fog: 0.4 * (wps + 100 * (complex / Math.max(1, words.length))),
+      cli: 5.88 * (text.replace(/\s/g, "").length / Math.max(1, words.length)) - 29.6 * (sentences.length / Math.max(1, words.length)) - 15.8,
+      readingMin: words.length / 230,
+      sentWordCounts,
+      longest: sentences.slice().sort((a, b) => this.words(b).length - this.words(a).length)[0] || "",
+      freq, freqAll, bigrams, lengths,
+      paraWords: paras.map(p => this.words(p).length),
+      schema: this.schemaStats(text, sentences, chars, words.length, paras.length),
+      markers: [
+        { label: "Questions", pattern: "/\\?/", value: count(/\?/g) },
+        { label: "Exclamations", pattern: "/!/", value: count(/!/g) },
+        { label: "Quoted passages", pattern: "\u201c…\u201d or \"…\"", value: count(/[\u201c"][^\u201d"]{8,}[\u201d"]/g) },
+        { label: "Author–year citations", pattern: "(Name, 1999)", value: count(/\([A-Z][A-Za-z'\u2019-]+(?:\s+(?:et al\.?|and|&)\s+[A-Z][A-Za-z'\u2019-]+)*,?\s+(?:1[6-9]|20)\d{2}[a-z]?\)/g) },
+        { label: "Bracketed reference numbers", pattern: "[12] or [3–5]", value: count(/\[\d{1,3}(?:\s*[\u2013,-]\s*\d{1,3})*\]/g) },
+        { label: "URLs and DOIs", pattern: "http… / doi:", value: count(/(?:https?:\/\/|www\.|doi:)\S{4,}/gi) },
+        { label: "Numerals", pattern: "/\\b\\d+\\b/", value: count(/\b\d+(?:[.,]\d+)?\b/g) },
+        { label: "Percentages", pattern: "/\\d+%/", value: count(/\d+(?:\.\d+)?\s?%/g) },
+        { label: "Capitalised name-like tokens", pattern: "mid-sentence Xxx", value: count(/(?<![.!?]\s)(?<!^)\b[A-Z][a-z]{2,}\b/gm) }
+      ]
+    };
+    this.setState({ status: "ready", data, progress: 1 });
+  }
+
+  /* ---------- formatting ---------- */
+
+  n(v, d) { return (v == null || isNaN(v)) ? "—" : Number(v).toLocaleString(undefined, { minimumFractionDigits: d || 0, maximumFractionDigits: d || 0 }); }
+
+  top(map, k) {
+    return Object.keys(map).sort((a, b) => map[b] - map[a] || a.localeCompare(b)).slice(0, k).map(t => ({ term: t, n: map[t] }));
+  }
+
+  bar(v, max, color) {
+    return { width: Math.max(2, (v / Math.max(1, max)) * 100) + "%", height: "100%", background: color || (this.props.accentColor || "#1F4E68"), borderRadius: "2px" };
+  }
+
+  fleschLabel(v) {
+    if (v >= 70) return "plain, conversational";
+    if (v >= 60) return "standard prose";
+    if (v >= 50) return "fairly difficult";
+    if (v >= 30) return "difficult, academic";
+    return "very difficult";
+  }
+
+  /* ---------- handlers ---------- */
+
+  onPick = e => {
+    const f = e.target.files && e.target.files[0];
+    if (f) f.arrayBuffer().then(b => this.process(b, f.name));
+  };
+  onDragOver = e => e.preventDefault();
+  onDragLeave = () => { };
+  onDrop = e => e.preventDefault();
+
+  metricRows() {
+    const d = this.state.data;
+    return [["File", this.state.fileName], ["Pages", d.pages]]
+      .concat((d.schema || []).map(r => [r.field, r.value == null ? "" : r.value]))
+      .concat([
+      ["Characters", d.chars],
+      ["Characters excluding spaces", d.charsNoSpace], ["Words", d.words], ["Unique word forms", d.unique],
+      ["Words used once", d.hapax], ["Sentences", d.sentences], ["Paragraphs", d.paragraphs],
+      ["Words per sentence", d.wps.toFixed(2)], ["Characters per word", d.cpw.toFixed(2)],
+      ["Syllables per word", d.spw.toFixed(2)], ["Type-token ratio", d.ttr.toFixed(3)],
+      ["Words over 6 characters", d.longWords], ["Flesch reading ease", d.flesch.toFixed(1)],
+      ["Flesch-Kincaid grade", d.fk.toFixed(1)], ["Gunning fog index", d.fog.toFixed(1)],
+      ["Coleman-Liau index", d.cli.toFixed(1)], ["Reading time (min at 230 wpm)", d.readingMin.toFixed(1)]
+    ].concat(d.markers.map(m => [m.label, m.value])));
+  }
+
+  onExportCsv = () => {
+    if (!this.state.data) return;
+    const esc = v => '"' + String(v).replace(/"/g, '""') + '"';
+    const lines = ["metric,value"].concat(this.metricRows().map(r => esc(r[0]) + "," + esc(r[1])));
+    lines.push("", "page,characters,words,sentences");
+    this.state.data.perPage.forEach((t, i) => {
+      lines.push([i + 1, t.length, this.words(t).length, this.splitSentences(t.replace(/\n+/g, " ")).length].join(","));
+    });
+    this.download(lines.join("\n"), "text/csv", "descriptive-metrics.csv");
+  };
+
+  onExportJson = () => {
+    if (!this.state.data) return;
+    const d = this.state.data, o = { file: this.state.fileName, generated: new Date().toISOString(), metrics: {} };
+    this.metricRows().forEach(r => { o.metrics[r[0]] = r[1]; });
+    o.LH_Src_Stats = {};
+    (d.schema || []).forEach(r => { o.LH_Src_Stats[r.field] = { value: r.value, basis: r.basis, note: r.note }; });
+    const c = this.state.complex;
+    if (c) {
+      o.LH_Src_Stats.Num_Args = { value: (c.arguments || []).length, basis: "model", note: "OpenAI " + c._model };
+      o.LH_Src_Stats.Num_Evidence = { value: (c.evidence || []).length, basis: "model", note: "OpenAI " + c._model };
+      ["quality_args", "quality_evidence", "quality_citations"].forEach(k => {
+        const f = "Quality_" + k.split("_")[1].replace(/^./, ch => ch.toUpperCase());
+        o.LH_Src_Stats[f] = { value: c[k] ? c[k].score : null, basis: "model", note: c[k] ? c[k].rationale : "" };
+      });
+      o.complex = {
+        Year: c.year, Title: c.title, Authors: c.authors, Keywords: c.keywords, Summary: c.summary,
+        Type_of_writing: c.writing_type, Type_rationale: c.writing_type_rationale,
+        arguments: c.arguments, evidence: c.evidence, model: c._model, usage: c._usage
+      };
+    }
+    o.topTerms = this.top(d.freq, 25);
+    o.topBigrams = this.top(d.bigrams, 15);
+    o.pages = d.perPage.map((t, i) => ({ page: i + 1, characters: t.length, words: this.words(t).length }));
+    this.download(JSON.stringify(o, null, 2), "application/json", "descriptive-metrics.json");
+  };
+
+  download(text, mime, name) {
+    const url = URL.createObjectURL(new Blob([text], { type: mime }));
+    const a = document.createElement("a");
+    a.href = url; a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+
+  /* ---------- render values ---------- */
+
+  renderVals() {
+    const s = this.state, d = s.data;
+    const accent = this.props.accentColor || "#1F4E68";
+    const base = {
+      fileName: s.fileName,
+      kicker: s.mode === "complex" ? "Complex layer · OpenAI extraction, quotes checked" : "Simple layer · deterministic, no model calls",
+      busy: s.status === "loading", failed: s.status === "error", ready: s.status === "ready",
+      error: s.error, dragging: s.dragging,
+      progressLabel: s.progressLabel,
+      progressBar: { width: Math.round(s.progress * 100) + "%", height: "100%", background: accent, transition: "width .25s ease" },
+      statusLine: s.status === "ready" && d ? d.pages + " pages · " + this.n(d.words) + " words · parsed locally" : "",
+      tabs: [], cards: [], readability: [], sentenceBuckets: [], topTerms: [], topBigrams: [],
+      lengthBuckets: [], markers: [], paragraphStats: [], pageColumns: [], pageRows: [], queryHits: [], schemaRows: [],
+      query: s.query, queryCountLabel: "", isOverview: s.tab === "overview", isLanguage: s.tab === "language",
+      isStructure: s.tab === "structure", isPages: s.tab === "pages",
+      onPick: this.onPick, onDragOver: this.onDragOver, onDragLeave: this.onDragLeave, onDrop: this.onDrop,
+      onExportCsv: this.onExportCsv, onExportJson: this.onExportJson,
+      onQuery: e => this.setState({ query: e.target.value }),
+      toggleStopwords: () => this.setState({ includeStop: !s.includeStop }),
+      stopwordLabel: s.includeStop ? "Excluding nothing — hide function words" : "Function words hidden — show all",
+      stopwordBtnStyle: {
+        cursor: "pointer", font: "500 11px 'IBM Plex Sans',sans-serif", padding: "6px 10px",
+        border: "1px solid " + (s.includeStop ? accent : "#C7BFB2"), background: s.includeStop ? "#E4EDF2" : "transparent",
+        color: "#141210", borderRadius: "2px"
+      },
+      longestSentence: "", longestSentenceWords: "—", shortestSentenceWords: "—", medianSentenceWords: "—"
+    };
+
+    base.isSimple = s.mode === "simple";
+    base.isComplex = s.mode === "complex";
+    base.modeTabs = [["simple", "Simple Analysis"], ["complex", "Complex Analysis"]].map(([k, label]) => ({
+      label, onClick: () => this.setState({ mode: k }),
+      style: {
+        cursor: "pointer", font: (s.mode === k ? 600 : 400) + " 14px 'IBM Plex Sans',sans-serif",
+        padding: "13px 22px", border: "1px solid " + (s.mode === k ? "#141210" : "#DBD4C8"),
+        background: s.mode === k ? "#141210" : "transparent",
+        color: s.mode === k ? "#FBFAF8" : "#6B6459", borderRadius: "2px", letterSpacing: "0.01em"
+      }
+    }));
+    const c = s.complex;
+    base.oaKey = s.oaKey;
+    base.oaModel = s.oaModel;
+    base.oaError = s.oaError;
+    base.hasComplex = !!c;
+    base.oaModels = [
+      { id: "gpt-4.1-mini", label: "gpt-4.1-mini" },
+      { id: "gpt-4.1", label: "gpt-4.1" },
+      { id: "gpt-4o", label: "gpt-4o" },
+      { id: "gpt-4o-mini", label: "gpt-4o-mini" }
+    ];
+    base.onKeyInput = e => {
+      const v = e.target.value;
+      this.setState({ oaKey: v });
+      try { localStorage.setItem("lh.openai.key", v); } catch (err) { }
+    };
+    base.oaBase = s.oaBase;
+    base.onBaseInput = e => {
+      const v = e.target.value;
+      this.setState({ oaBase: v });
+      try { localStorage.setItem("lh.openai.base", v); } catch (err) { }
+    };
+    base.onModelChange = e => {
+      const v = e.target.value;
+      this.setState({ oaModel: v });
+      try { localStorage.setItem("lh.openai.model", v); } catch (err) { }
+    };
+    base.onRunComplex = this.onRunComplex;
+    base.runBtnLabel = s.oaRunning ? "Running… " + (s.oaElapsed || 0).toFixed(1) + "s" : (c ? "Run again" : "Run complex analysis");
+    base.runBtnStyle = {
+      cursor: s.oaRunning ? "progress" : "pointer",
+      font: "500 13px 'IBM Plex Sans',sans-serif", padding: "11px 18px", whiteSpace: "nowrap",
+      border: "1px solid #141210", background: s.oaRunning ? "#6B6459" : "#141210",
+      borderColor: s.oaRunning ? "#6B6459" : "#141210", color: "#FBFAF8", borderRadius: "2px"
+    };
+    base.payloadNote = d
+      ? "One POST to " + ((s.oaBase || "").replace(/\/+$/, "") || "the endpoint") + "/chat/completions: the parsed text (" + this.n(Math.min(90000, d.chars)) + " characters ≈ " + this.n(Math.min(90000, d.chars) / 4) + " tokens), a strict JSON schema, temperature 0, and a rule that every point quote the document word for word. The result is cached in this browser against the file name."
+      : "";
+    base.runMeta = c
+      ? c._model + " · " + (c._usage ? this.n(c._usage.total_tokens) + " tokens · " : "") + c._seconds + "s" + (c._truncated ? " · text truncated" : "")
+      : "not run yet for this file";
+    if (s.oaRunning) base.runMeta = s.oaModel + " · running · " + (s.oaElapsed || 0).toFixed(1) + "s elapsed";
+    base.groundingNote = "";
+    base.typePills = [];
+    base.cKeywords = [];
+    base.complexRows = [];
+    base.argRows = [];
+    base.evidRows = [];
+    base.cTitle = ""; base.cAuthors = ""; base.cYear = ""; base.cSummary = ""; base.cTypeRationale = "";
+
+    if (c) {
+      const accentPill = { background: "#141210", color: "#FBFAF8", borderColor: "#141210" };
+      base.typePills = ["Informative", "Persuasive", "Entertainment", "Demonstrative", "Ceremonial"].map(t => ({
+        label: t,
+        style: Object.assign({
+          font: (c.writing_type === t ? 600 : 400) + " 11.5px 'IBM Plex Sans',sans-serif",
+          padding: "5px 11px", borderRadius: "2px", border: "1px solid #E2DCD2",
+          background: "transparent", color: "#575045"
+        }, c.writing_type === t ? accentPill : {})
+      }));
+      base.cTitle = c.title || "No title stated in the text";
+      base.cAuthors = (c.authors && c.authors.length) ? c.authors.join(" · ") : "No author stated";
+      base.cYear = c.year ? String(c.year) : "Year not stated";
+      base.cSummary = c.summary || "";
+      base.cTypeRationale = c.writing_type_rationale ? "Type of writing — " + c.writing_type + ": " + c.writing_type_rationale : "";
+      base.cKeywords = (c.keywords || []).map(k => ({ label: k }));
+
+      const tally = arr => {
+        const st = arr.map(x => this.spanStatus(x.span));
+        const n = k => st.filter(v => v === k).length;
+        const parts = [(n("verbatim") + n("elided")) + " exact"];
+        if (n("near")) parts.push(n("near") + " reworded");
+        if (n("unmatched")) parts.push(n("unmatched") + " not in the document");
+        return parts.join(" · ") + " of " + arr.length;
+      };
+      const score = q => (q && q.score != null) ? q.score + " / 5" : "—";
+      const rat = q => (q && q.rationale) || "not returned";
+      base.complexRows = [
+        { field: "Num_Args", value: this.n((c.arguments || []).length), note: "quotes checked: " + tally(c.arguments || []) },
+        { field: "Num_Evidence", value: this.n((c.evidence || []).length), note: "quotes checked: " + tally(c.evidence || []) },
+        { field: "Quality_Args", value: score(c.quality_args), note: rat(c.quality_args) },
+        { field: "Quality_Evidence", value: score(c.quality_evidence), note: rat(c.quality_evidence) },
+        { field: "Quality_Citations", value: score(c.quality_citations), note: rat(c.quality_citations) }
+      ].map(r => Object.assign(r, {
+        valueStyle: { fontFamily: "'Source Serif 4',Georgia,serif", fontSize: "20px", fontWeight: 600, whiteSpace: "nowrap", textAlign: "right" }
+      }));
+
+      const tone = { verbatim: ["#E4EDF2", "#14435C"], elided: ["#E9EEF0", "#3D5F70"], near: ["#EFEAE1", "#6B5A3E"], unmatched: ["#F6EDE4", "#8A4B2F"], unchecked: ["#EDEBE7", "#575045"] };
+      const badgeFor = span => {
+        const st = this.spanStatus(span);
+        return {
+          text: { verbatim: "exact", elided: "exact", near: "reworded", unmatched: "not found in document", unchecked: "not checked" }[st],
+          style: {
+            font: "500 9.5px 'IBM Plex Sans',sans-serif", letterSpacing: "0.06em", textTransform: "uppercase",
+            padding: "3px 6px", borderRadius: "2px", whiteSpace: "nowrap", marginTop: "2px",
+            background: tone[st][0], color: tone[st][1]
+          }
+        };
+      };
+      base.argRows = (c.arguments || []).map((a, i) => {
+        const b = badgeFor(a.span);
+        return { n: String(i + 1).padStart(2, "0"), claim: a.claim, span: "“" + (a.span || "") + "”", badge: b.text, badgeStyle: b.style };
+      });
+      const args = c.arguments || [];
+      const argFlat = args.map(a => this.flatten(a.span));
+      // A model that returns 1,2,3… in order is echoing each item's own position,
+      // not pointing at an argument. Treat the whole set of links as unusable.
+      const ev = c.evidence || [];
+      const echoed = ev.length > 2 && ev.every((e, i) => e.argument_number === i + 1);
+      base.evidRows = ev.map(e => {
+        const b = badgeFor(e.span);
+        const ef = this.flatten(e.span);
+        let reuse = "";
+        if (ef.length > 20 && argFlat.some(af => af.length > 20 && (af.indexOf(ef) !== -1 || ef.indexOf(af) !== -1))) {
+          reuse = "this passage is already listed as an argument's own quote — not independent support";
+        }
+        const raw = e.argument_number;
+        const num = (!echoed && raw >= 1 && raw <= args.length) ? raw : 0;
+        return {
+          kind: e.kind, supports: e.supports, span: "“" + (e.span || "") + "”", badge: b.text, badgeStyle: b.style,
+          link: num ? "backs argument " + String(num).padStart(2, "0") : (echoed ? "link unreliable — model numbered these in order" : "not tied to a listed argument"),
+          reuse: reuse,
+          linkStyle: {
+            font: "500 10px 'IBM Plex Mono',monospace", padding: "3px 7px", borderRadius: "2px",
+            background: num ? "#E4EDF2" : "#F1E7DE", color: num ? "#14435C" : "#5A4238", whiteSpace: "nowrap"
+          },
+          reuseStyle: { fontSize: "11px", color: "#8A4B2F", marginTop: "6px", display: reuse ? "block" : "none" },
+          kindStyle: {
+            font: "500 10px 'IBM Plex Sans',sans-serif", letterSpacing: "0.06em", textTransform: "uppercase",
+            padding: "3px 7px", borderRadius: "2px", background: "#EFEAE1", color: "#6B5A3E", whiteSpace: "nowrap"
+          }
+        };
+      });
+      const allSpans = (c.arguments || []).concat(c.evidence || []);
+      base.groundingNote = "Every quote above is searched for in the document text, ignoring spacing and punctuation differences — "
+        + tally(allSpans) + " across both lists. This checks whether the model really copied the document, not how good the writing is. "
+        + "“Exact” covers quotes found word for word, including ones that use “…” to skip a phrase where every kept part was found. "
+        + "“Reworded” means it changed some of the wording. “Not in the document” means the quote isn't there at all, so treat that "
+        + "item as the model's own invention. Judgements of quality are the three Quality_ scores above, which are a different thing. "
+        + "Counts of arguments and evidence depend on where you draw the line between one point and the next, so a second run can differ.";
+    }
+
+    base.tabs = [["overview", "Overview"], ["language", "Language"], ["structure", "Structure"], ["pages", "Pages"]].map(([k, label]) => ({
+      label, onClick: () => this.setState({ tab: k }),
+      style: {
+        cursor: "pointer", font: (s.tab === k ? 600 : 400) + " 13px 'IBM Plex Sans',sans-serif",
+        padding: "10px 16px", border: "1px solid " + (s.tab === k ? "#DBD4C8" : "transparent"),
+        borderBottom: s.tab === k ? "1px solid #FBFAF8" : "1px solid transparent",
+        marginBottom: "-1px", background: s.tab === k ? "#FBFAF8" : "transparent",
+        color: s.tab === k ? "#141210" : "#6B6459", borderRadius: "3px 3px 0 0"
+      }
+    }));
+
+    if (!d) return base;
+
+    const badge = {
+      exact: { bg: "#E4EDF2", fg: "#14435C", text: "exact" },
+      reconstructed: { bg: "#EFEAE1", fg: "#6B5A3E", text: "reconstructed" },
+      heuristic: { bg: "#F6EDE4", fg: "#8A4B2F", text: "heuristic" },
+      pending: { bg: "#EDEBE7", fg: "#575045", text: "complex layer" }
+    };
+    base.schemaRows = (d.schema || []).map(r => ({
+      field: r.field,
+      value: r.value == null ? "—" : this.n(r.value),
+      note: r.note,
+      badgeText: badge[r.basis].text,
+      badgeStyle: {
+        font: "500 10px 'IBM Plex Sans',sans-serif", letterSpacing: "0.06em", textTransform: "uppercase",
+        padding: "3px 7px", borderRadius: "2px", whiteSpace: "nowrap",
+        background: badge[r.basis].bg, color: badge[r.basis].fg
+      },
+      valueStyle: {
+        fontFamily: "'Source Serif 4',Georgia,serif", fontSize: "20px", fontWeight: 600,
+        textAlign: "right", whiteSpace: "nowrap", color: r.value == null ? "#B5AC9E" : "#141210"
+      }
+    }));
+
+    base.cards = [
+      { label: "Pages", value: this.n(d.pages), note: "text layer present" },
+      { label: "Words", value: this.n(d.words), note: this.n(d.unique) + " distinct forms" },
+      { label: "Characters", value: this.n(d.chars), note: this.n(d.charsNoSpace) + " without spaces" },
+      { label: "Sentences", value: this.n(d.sentences), note: d.wps.toFixed(1) + " words each" },
+      { label: "Paragraphs", value: this.n(d.paragraphs), note: (d.words / Math.max(1, d.paragraphs)).toFixed(0) + " words each" },
+      { label: "Type–token ratio", value: d.ttr.toFixed(3), note: this.n(d.hapax) + " words used once" },
+      { label: "Chars per word", value: d.cpw.toFixed(2), note: (100 * d.longWords / Math.max(1, d.words)).toFixed(1) + "% over 6 chars" },
+      { label: "Syllables per word", value: d.spw.toFixed(2), note: "heuristic count" },
+      { label: "Reading time", value: d.readingMin.toFixed(0) + " min", note: "at 230 wpm" },
+      { label: "Words per page", value: this.n(d.words / Math.max(1, d.pages)), note: "mean density" }
+    ];
+
+    base.readability = [
+      { name: "Flesch reading ease", value: d.flesch.toFixed(1), note: this.fleschLabel(d.flesch) + " · 0–100, higher is easier" },
+      { name: "Flesch–Kincaid grade", value: d.fk.toFixed(1), note: "US school grade level" },
+      { name: "Gunning fog index", value: d.fog.toFixed(1), note: "years of education assumed" },
+      { name: "Coleman–Liau index", value: d.cli.toFixed(1), note: "character-based grade level" }
+    ];
+
+    const sw = d.sentWordCounts;
+    const buckets = [["1–9", n => n < 10], ["10–19", n => n >= 10 && n < 20], ["20–29", n => n >= 20 && n < 30],
+      ["30–39", n => n >= 30 && n < 40], ["40+", n => n >= 40]];
+    const bVals = buckets.map(([label, fn]) => ({ label, n: sw.filter(fn).length }));
+    const bMax = Math.max.apply(null, bVals.map(b => b.n).concat([1]));
+    base.sentenceBuckets = bVals.map(b => ({ label: b.label + " w", value: this.n(b.n), bar: this.bar(b.n, bMax) }));
+    base.longestSentenceWords = this.n(sw[sw.length - 1]);
+    base.shortestSentenceWords = this.n(sw[0]);
+    base.medianSentenceWords = this.n(sw[Math.floor(sw.length / 2)]);
+    base.longestSentence = d.longest;
+
+    const src = s.includeStop ? d.freqAll : d.freq;
+    const terms = this.top(src, this.props.topTermCount || 14);
+    const tMax = terms.length ? terms[0].n : 1;
+    base.topTerms = terms.map(t => ({ term: t.term, value: this.n(t.n) + " · " + (100 * t.n / d.words).toFixed(2) + "%", bar: this.bar(t.n, tMax) }));
+    base.topBigrams = this.top(d.bigrams, 9).filter(b => b.n > 1).map(b => ({ term: b.term, value: this.n(b.n) }));
+    if (!base.topBigrams.length) base.topBigrams = [{ term: "No two-word phrase repeats", value: "0" }];
+
+    const lMax = Math.max.apply(null, Object.keys(d.lengths).map(k => d.lengths[k]).concat([1]));
+    base.lengthBuckets = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].filter(k => d.lengths[k]).map(k => ({
+      label: (k === 10 ? "10+" : String(k)) + " ch", value: this.n(d.lengths[k]), bar: this.bar(d.lengths[k] || 0, lMax)
+    }));
+
+    base.markers = d.markers.map(m => ({ label: m.label, pattern: m.pattern, value: this.n(m.value) }));
+
+    const pw = d.paraWords.slice().sort((a, b) => a - b);
+    base.paragraphStats = [
+      { label: "Paragraphs reconstructed", value: this.n(d.paragraphs) },
+      { label: "Mean words per paragraph", value: (d.words / Math.max(1, d.paragraphs)).toFixed(1) },
+      { label: "Median words per paragraph", value: this.n(pw[Math.floor(pw.length / 2)]) },
+      { label: "Longest paragraph", value: this.n(pw[pw.length - 1]) + " words" },
+      { label: "Single-sentence paragraphs", value: this.n(d.perPage.join("\n\n").split(/\n\n+/).filter(p => this.splitSentences(p).length === 1).length) }
+    ];
+
+    const cols = [["page", "Page"], ["chars", "Characters"], ["words", "Words"], ["sentences", "Sentences"], ["wps", "Words / sentence"], ["share", "Share of document"]];
+    base.pageColumns = cols.map(([k, label], i) => ({
+      label: label + (s.sortKey === k ? (s.sortDir === 1 ? "  \u2191" : "  \u2193") : ""),
+      onClick: () => this.setState(p => ({ sortKey: k, sortDir: p.sortKey === k ? -p.sortDir : (k === "page" ? 1 : -1) })),
+      style: { padding: "11px 14px", fontWeight: 600, fontSize: "11.5px", cursor: "pointer", whiteSpace: "nowrap", textAlign: i === 0 ? "left" : "right" }
+    }));
+
+    const rows = d.perPage.map((t, i) => {
+      const w = this.words(t).length;
+      const sc = this.splitSentences(t.replace(/\n+/g, " ")).length;
+      return { page: i + 1, chars: t.length, words: w, sentences: sc, wps: w / Math.max(1, sc), share: 100 * w / Math.max(1, d.words) };
+    });
+    const maxShare = Math.max.apply(null, rows.map(r => r.share).concat([1]));
+    rows.sort((a, b) => (a[s.sortKey] - b[s.sortKey]) * s.sortDir);
+    base.pageRows = rows.map((r, i) => ({
+      style: { background: i % 2 ? "#F7F4EF" : "#FBFAF8" },
+      cells: [
+        { value: String(r.page), style: { padding: "9px 14px", borderBottom: "1px solid #EFEAE1", fontFamily: "'IBM Plex Mono',monospace", fontSize: "11.5px" } },
+        { value: this.n(r.chars), style: { padding: "9px 14px", borderBottom: "1px solid #EFEAE1", textAlign: "right" } },
+        { value: this.n(r.words), style: { padding: "9px 14px", borderBottom: "1px solid #EFEAE1", textAlign: "right" } },
+        { value: this.n(r.sentences), style: { padding: "9px 14px", borderBottom: "1px solid #EFEAE1", textAlign: "right" } },
+        { value: r.wps.toFixed(1), style: { padding: "9px 14px", borderBottom: "1px solid #EFEAE1", textAlign: "right", color: "#575045" } },
+        {
+          value: r.share.toFixed(1) + "%",
+          style: {
+            padding: "9px 14px", borderBottom: "1px solid #EFEAE1", textAlign: "right",
+            backgroundImage: "linear-gradient(to right, " + accent + "22 " + (100 * r.share / maxShare).toFixed(1) + "%, transparent 0)"
+          }
+        }
+      ]
+    }));
+
+    const q = s.query.trim();
+    if (q.length > 1) {
+      const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+      let total = 0;
+      const hits = [];
+      d.perPage.forEach((t, pi) => {
+        const flat = t.replace(/\n+/g, " ");
+        let m;
+        re.lastIndex = 0;
+        while ((m = re.exec(flat)) !== null) {
+          total++;
+          if (hits.length < 8) hits.push({
+            page: pi + 1,
+            before: (m.index > 60 ? "… " : "") + flat.slice(Math.max(0, m.index - 60), m.index),
+            match: m[0],
+            after: flat.slice(m.index + m[0].length, m.index + m[0].length + 70) + " …"
+          });
+          if (m.index === re.lastIndex) re.lastIndex++;
+        }
+      });
+      base.queryHits = hits;
+      base.queryCountLabel = total === 0
+        ? "No occurrences of “" + q + "”."
+        : this.n(total) + " occurrence" + (total === 1 ? "" : "s") + " of “" + q + "” · " + (1000 * total / d.words).toFixed(2) + " per 1,000 words" + (total > 8 ? " · first 8 shown" : "");
+    } else {
+      base.queryCountLabel = "Counts are exact and case-insensitive; substring matches included.";
+    }
+
+    return base;
+  }
+}
+</script>
+</body>
+</html>
